@@ -18,7 +18,7 @@ class Hello(models.Model):
     _name = 'hello.message'
     _description = 'Hello Message'
 
-    MESSAGE = "Bonjour tout le monde"
+    MESSAGE = "Bonjour tout le monde v2"
 
     name = fields.Char(string='Name', required=True)
     greeting = fields.Char(
