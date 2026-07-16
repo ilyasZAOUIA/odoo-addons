@@ -1,0 +1,79 @@
+# Workflow de notification.
+# Se déclenche quand un merge arrive sur staging ou preprod.
+# Affiche un résumé des changements dans le log.
+#
+# NOTE : l'envoi de mail sera ajouté à un jour ultérieur (jour 3 du plan).
+# Pour aujourd'hui, on log juste — ça permet de valider le déclencheur.
+
+name: notify-merge
+
+on:
+  push:
+    branches:
+      - staging
+      - preprod
+
+jobs:
+  notify:
+    name: Notification de merge
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # besoin du commit précédent pour le diff
+
+      - name: Détecter les modules impactés
+        id: modules
+        run: |
+          # Liste des fichiers changés dans ce push
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD)
+          echo "Fichiers changés :"
+          echo "$CHANGED_FILES"
+
+          # Extraire les noms de modules (premier dossier de chaque chemin)
+          MODULES=$(echo "$CHANGED_FILES" | awk -F/ '{print $1}' | sort -u | grep -v -E '^(.github|docs|\.)' || echo "")
+          echo ""
+          echo "Modules impactés :"
+          echo "$MODULES"
+
+          # Passer aux étapes suivantes
+          {
+            echo "modules<<EOF"
+            echo "$MODULES"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+      - name: Résumé du merge
+        run: |
+          echo "======================================================"
+          echo "MERGE DÉTECTÉ sur ${{ github.ref_name }}"
+          echo "======================================================"
+          echo ""
+          echo "Auteur      : ${{ github.event.head_commit.author.name }}"
+          echo "Message     : ${{ github.event.head_commit.message }}"
+          echo "Commit      : ${{ github.sha }}"
+          echo ""
+          echo "Modules impactés :"
+          echo "${{ steps.modules.outputs.modules }}"
+          echo ""
+          echo "Voir le diff complet :"
+          echo "  https://github.com/${{ github.repository }}/commit/${{ github.sha }}"
+          echo "======================================================"
+
+      # TODO jour 3 : envoi mail avec liens "Voir changements" / "Mettre à jour ma branche"
+      # - name: Envoyer email de notification
+      #   uses: dawidd6/action-send-mail@v3
+      #   with:
+      #     server_address: smtp.gmail.com
+      #     server_port: 587
+      #     username: ${{ secrets.MAIL_USERNAME }}
+      #     password: ${{ secrets.MAIL_PASSWORD }}
+      #     subject: "Merge sur ${{ github.ref_name }} — ${{ steps.modules.outputs.modules }}"
+      #     to: team@example.com
+      #     from: cicd-bot@odoo-project
+      #     body: |
+      #       Un merge a été effectué sur ${{ github.ref_name }}.
+      #       Modules impactés : ${{ steps.modules.outputs.modules }}
+      #       Voir : https://github.com/${{ github.repository }}/commit/${{ github.sha }}

@@ -1,0 +1,109 @@
+# Configuration Mergify pour le repo odoo-addons.
+#
+# Objectif :
+#   1. Bloquer les merges vers `staging` si la branche n'est pas à jour
+#   2. Bloquer les merges si la CI échoue
+#   3. Signaler explicitement les conflits Git à l'auteur de la PR
+#
+# Documentation : https://docs.mergify.com/configuration/file-format/
+
+pull_request_rules:
+
+  # ======================================================
+  # RÈGLE 1 : Détecter et signaler les conflits Git
+  # ======================================================
+  # Quand une PR est en conflit avec sa base, Mergify ajoute un label et
+  # commente pour signaler à l'auteur qu'il doit rebase manuellement.
+  - name: Signaler les conflits Git à l'auteur
+    conditions:
+      - conflict
+      - base=staging
+    actions:
+      label:
+        add:
+          - conflict
+      comment:
+        message: |
+          ⚠️ **Conflit Git détecté**
+
+          Cette PR ne peut pas être fusionnée automatiquement — elle entre en
+          conflit avec la branche `staging`.
+
+          Pour résoudre :
+          ```bash
+          git checkout {{ head }}
+          git fetch origin
+          git rebase origin/staging
+          # résous les conflits dans ton éditeur
+          # marque les fichiers résolus avec: git add <fichier>
+          # continue le rebase: git rebase --continue
+          git push --force-with-lease
+          ```
+
+          Une fois le rebase fait, la CI relance automatiquement et cette PR
+          sera à nouveau candidate au merge.
+
+  # ======================================================
+  # RÈGLE 2 : Enlever le label conflict quand résolu
+  # ======================================================
+  - name: Retirer le label conflict quand la PR est à jour
+    conditions:
+      - -conflict
+      - label=conflict
+    actions:
+      label:
+        remove:
+          - conflict
+
+  # ======================================================
+  # RÈGLE 3 : Auto-rebase des PR à jour mais en retard
+  # ======================================================
+  # Si une PR est approuvée, CI OK, mais la branche est en retard sur staging
+  # SANS conflit, Mergify tente de rebase automatiquement pour préparer le merge.
+  - name: Rebase automatique quand PR à jour mais branche en retard
+    conditions:
+      - base=staging
+      - -conflict
+      - -draft
+      - "#commits-behind>0"
+    actions:
+      rebase:
+
+  # ======================================================
+  # RÈGLE 4 : Merge automatique quand tous les critères sont OK
+  # ======================================================
+  # Merge conditions :
+  #   - PR vise la branche staging
+  #   - Pas en draft
+  #   - Pas de conflit
+  #   - Branche à jour avec staging (0 commits behind)
+  #   - Check CI 'tests' est passé
+  #   - Label 'ready-to-merge' présent (contrôle manuel pour le test)
+  #
+  # Pour le test aujourd'hui, on utilise un label manuel plutôt qu'une revue
+  # (puisque tu es solo sur les PR). En prod, remplacer par 'approved-reviews-by>=1'.
+  - name: Merge automatique vers staging
+    conditions:
+      - base=staging
+      - -draft
+      - -conflict
+      - "#commits-behind=0"
+      - check-success=tests
+      - label=ready-to-merge
+    actions:
+      merge:
+        method: merge
+      delete_head_branch:
+
+# ======================================================
+# Configuration des queue rules (pour évolution future)
+# ======================================================
+# On ne les utilise pas dans ce test, mais on les définit pour référence.
+# Elles permettront à terme d'ordonner les merges concurrents proprement.
+
+queue_rules:
+  - name: default
+    merge_conditions:
+      - base=staging
+      - check-success=tests
+    merge_method: merge

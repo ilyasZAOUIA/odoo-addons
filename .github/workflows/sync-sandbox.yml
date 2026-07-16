@@ -1,0 +1,78 @@
+# Workflow de synchronisation des sandboxes.
+# Tourne sur le self-hosted runner (sur la VM).
+# Détecte quelle branche a été poussée, met à jour le sandbox correspondant.
+#
+# Mapping branch → sandbox :
+#   dev-dev1 → sandbox dev1
+#   dev-dev2 → sandbox dev2
+#   staging  → sandbox staging
+#   preprod  → sandbox preprod
+
+name: sync-sandbox
+
+on:
+  push:
+    branches:
+      - dev-*
+      - staging
+      - preprod
+
+jobs:
+  sync:
+    name: Synchroniser le sandbox
+    runs-on: [self-hosted, linux, x64, odoo-vm]
+
+    steps:
+      - name: Déterminer le nom du sandbox
+        id: sandbox
+        run: |
+          BRANCH="${{ github.ref_name }}"
+          if [[ "$BRANCH" == dev-* ]]; then
+            # dev-dev1 → dev1, dev-alice → alice
+            SANDBOX="${BRANCH#dev-}"
+          else
+            # staging → staging, preprod → preprod
+            SANDBOX="$BRANCH"
+          fi
+          echo "sandbox=$SANDBOX" >> $GITHUB_OUTPUT
+          echo "Branche poussée : $BRANCH"
+          echo "Sandbox cible   : $SANDBOX"
+
+      - name: Vérifier que le sandbox existe
+        run: |
+          SANDBOX_DIR="/srv/odoo/sandboxes/${{ steps.sandbox.outputs.sandbox }}"
+          if [ ! -d "$SANDBOX_DIR" ]; then
+            echo "::error::Sandbox '${{ steps.sandbox.outputs.sandbox }}' n'existe pas."
+            echo "::error::Provisionne-le d'abord avec :"
+            echo "::error::  ansible-playbook onboard-sandbox.yml -e 'sandbox_name=${{ steps.sandbox.outputs.sandbox }} branch=${{ github.ref_name }}'"
+            exit 1
+          fi
+
+      - name: Pull la nouvelle version du code
+        run: |
+          SANDBOX_DIR="/srv/odoo/sandboxes/${{ steps.sandbox.outputs.sandbox }}"
+          cd "$SANDBOX_DIR/addons"
+          git fetch origin
+          git reset --hard origin/${{ github.ref_name }}
+          echo "Code mis à jour :"
+          git log -1 --oneline
+
+      - name: Redémarrer le container Odoo
+        run: |
+          CONTAINER="sandbox_${{ steps.sandbox.outputs.sandbox }}_odoo"
+          docker restart "$CONTAINER"
+          echo "Container $CONTAINER redémarré."
+
+      - name: Attendre qu'Odoo réponde
+        run: |
+          # Petit délai pour laisser Odoo redémarrer proprement
+          sleep 10
+          echo "Sandbox ${{ steps.sandbox.outputs.sandbox }} à jour et redémarré."
+
+      - name: Résumé
+        run: |
+          echo "======================================================"
+          echo "Sandbox '${{ steps.sandbox.outputs.sandbox }}' synchronisé"
+          echo "URL       : https://${{ steps.sandbox.outputs.sandbox }}.odoo.local"
+          echo "Commit    : $(cd /srv/odoo/sandboxes/${{ steps.sandbox.outputs.sandbox }}/addons && git log -1 --oneline)"
+          echo "======================================================"

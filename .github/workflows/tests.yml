@@ -1,0 +1,45 @@
+# Workflow CI de base.
+# Tourne sur GitHub-hosted runners (ubuntu-latest) — indépendant de la VM.
+# Valide la syntaxe Python et la structure du manifest Odoo.
+# Utilisé par Mergify comme check "tests" avant merge.
+
+name: tests
+
+on:
+  pull_request:
+    branches:
+      - staging
+      - main
+  push:
+    branches:
+      - staging
+      - main
+
+jobs:
+  tests:
+    name: Validation syntax et structure
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Installer Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Vérifier la syntaxe Python
+        run: |
+          set -e
+          echo "=== Vérification syntaxe Python ==="
+          find . -name "*.py" -not -path "./.git/*" -print0 | while IFS= read -r -d '' f; do
+            python -m py_compile "$f"
+            echo "OK: $f"
+          done
+
+      - name: Vérifier la structure des modules Odoo
+        run: python .github/scripts/validate_manifests.py
+
+      - name: Résumé
+        run: echo "Tous les checks sont passés."
